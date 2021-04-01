@@ -7,11 +7,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
+
+type Config struct {
+	BucketName      string
+	Prefix          string
+	DestinationPath string
+}
 
 type Storage struct {
 	Client *storage.Client
@@ -81,14 +88,38 @@ func (s *Storage) DownloadObject(bucket, object, rootPath string) error {
 		return fmt.Errorf("ioutil.WriteFile: %v", err)
 	}
 
+	log.Printf("%s => %s", object, path)
+
 	return nil
 }
+
+func parseGCSUrl(uri string) (string, error) {
+	const prefix = "gs://"
+
+	if !strings.HasPrefix(uri, prefix) {
+		return "", fmt.Errorf("parse GCS URI %q: scheme must be %q", uri, prefix)
+	}
+
+	object := uri[len(prefix):]
+	if strings.IndexByte(object, '/') == -1 {
+		return "", fmt.Errorf("parse GCS URI %q: no object name", uri)
+	}
+
+	return object, nil
+}
+
+/*
+	TODO:
+		- Return Bucket name and object prefix path separately
+*/
 
 func main() {
 
 	bucketName := "online-infra-engineer-test"
 	prefix := "mydir"
 	path := "folder/newdir"
+
+	// log.Print(parseGCSUrl("gs://online-infra-engineer-test/mydir"))
 
 	storage := NewStorage()
 	defer storage.Client.Close()
@@ -98,8 +129,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if len(objects) == 0 {
+		log.Print("Objects not found")
+		return
+	}
+
 	for _, obj := range objects {
-		log.Print(obj)
 		err := storage.DownloadObject(bucketName, obj, path)
 		if err != nil {
 			log.Print(err)
