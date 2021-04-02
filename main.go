@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,6 +22,10 @@ type Config struct {
 
 type Storage struct {
 	Client *storage.Client
+}
+
+func NewConfig() *Config {
+	return &Config{}
 }
 
 func NewStorage() *Storage {
@@ -62,7 +66,7 @@ func (s *Storage) ListObjects(bucket, prefix string) ([]string, error) {
 
 func (s *Storage) DownloadObject(bucket, object, rootPath string) error {
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*60)
 	defer cancel()
 
 	sr, err := s.Client.Bucket(bucket).Object(object).NewReader(ctx)
@@ -71,24 +75,25 @@ func (s *Storage) DownloadObject(bucket, object, rootPath string) error {
 	}
 	defer sr.Close()
 
-	data, err := ioutil.ReadAll(sr)
-	if err != nil {
-		return fmt.Errorf("ioutil.ReadAll: %v", err)
-	}
+	fpath := filepath.Join(rootPath, object)
 
-	path := filepath.Join(rootPath, object)
-
-	err = os.MkdirAll(filepath.Dir(path), os.ModePerm)
+	err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("os.MkdirAll: %v", err)
 	}
 
-	err = ioutil.WriteFile(path, data, 0644)
+	out, err := os.Create(fpath)
 	if err != nil {
-		return fmt.Errorf("ioutil.WriteFile: %v", err)
+		return fmt.Errorf("os.Create: %v", err)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, sr)
+	if err != nil {
+		return fmt.Errorf("io.Copy: %v", err)
 	}
 
-	log.Printf("%s => %s", object, path)
+	log.Printf("%s => %s", object, fpath)
 
 	return nil
 }
@@ -111,6 +116,8 @@ func parseGCSUrl(uri string) (string, error) {
 /*
 	TODO:
 		- Return Bucket name and object prefix path separately
+		- Read config from command line arguments
+		- Optional: MultiThreading (-m)
 */
 
 func main() {
