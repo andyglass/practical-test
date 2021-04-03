@@ -29,13 +29,28 @@ type Storage struct {
 	Config *Config
 }
 
+/*
+	Create new storage config
+*/
 func NewConfig() *Config {
+	// Custom usage decription
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] bucket_name[/path][/file] path\n", os.Args[0])
+		fmt.Println("\nArguments 'bucket_name' and 'path' are mandatory.")
+		fmt.Println("Credentials must be provided via environment variable GOOGLE_APPLICATION_CREDENTIALS.")
+		fmt.Println("Example: export GOOGLE_APPLICATION_CREDENTIALS=~/credentials.json")
+		fmt.Println("\nOptions:")
+		flag.PrintDefaults()
+	}
+
 	isMultiThread := flag.Bool("m", false, "Run command in multi-thread mode")
 	flag.Parse()
 
 	argLen := len(flag.Args())
 	if argLen != 2 {
-		exception(fmt.Errorf("unexpected arguments count: %d instead of 2", argLen))
+		fmt.Printf("Unexpected arguments count: %d instead of 2\n\n", argLen)
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	uri := flag.Arg(0)
@@ -55,6 +70,9 @@ func NewConfig() *Config {
 	}
 }
 
+/*
+	Create new storage object
+*/
 func NewStorage() *Storage {
 
 	ctx := context.Background()
@@ -70,12 +88,20 @@ func NewStorage() *Storage {
 	}
 }
 
+/*
+	List bucket objects by prefix
+*/
 func (s *Storage) ListObjects() ([]string, error) {
 	ctx, cancel := context.WithTimeout(s.Ctx, time.Second*30)
 	defer cancel()
 
+	prefix := s.Config.Prefix
+	if prefix != "" && !strings.HasSuffix(prefix, "/") && filepath.Ext(prefix) == "" {
+		prefix += "/"
+	}
+
 	it := s.Client.Bucket(s.Config.BucketName).Objects(ctx, &storage.Query{
-		Prefix: s.Config.Prefix,
+		Prefix: prefix,
 	})
 
 	var objects []string
@@ -97,6 +123,9 @@ func (s *Storage) ListObjects() ([]string, error) {
 	return objects, nil
 }
 
+/*
+	Download bucket object
+*/
 func (s *Storage) DownloadObject(object string) error {
 	ctx, cancel := context.WithTimeout(s.Ctx, time.Second*60)
 	defer cancel()
@@ -109,8 +138,7 @@ func (s *Storage) DownloadObject(object string) error {
 
 	fpath := filepath.Join(s.Config.DestinationPath, object)
 
-	err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm)
-	if err != nil {
+	if os.MkdirAll(filepath.Dir(fpath), os.ModePerm) != nil {
 		return fmt.Errorf("os.MkdirAll: %v", err)
 	}
 
@@ -130,6 +158,9 @@ func (s *Storage) DownloadObject(object string) error {
 	return nil
 }
 
+/*
+	Validate and parse GCS uri
+*/
 func parseGCSUrl(uri string) (string, string, error) {
 	const scheme = "gs://"
 
@@ -155,6 +186,9 @@ func parseGCSUrl(uri string) (string, string, error) {
 	return bucket, path, nil
 }
 
+/*
+	General exception wrapper
+*/
 func exception(err error) {
 	fmt.Printf("CommandException: %v\n", err)
 	os.Exit(1)
@@ -164,10 +198,9 @@ func exception(err error) {
 	TODO:
 		- Optional: MultiThreading (-m)
 */
-
 func main() {
 
-	// url := "gs://online-infra-engineer-test/myd"
+	// url := "gs://online-infra-engineer-test/mydir"
 
 	storage := NewStorage()
 	defer storage.Client.Close()
