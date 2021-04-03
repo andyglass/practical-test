@@ -1,4 +1,4 @@
-module githib.com/andyglass/practical-test
+module practical-test
 
 go 1.16
 

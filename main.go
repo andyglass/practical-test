@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -35,7 +37,7 @@ type Storage struct {
 func NewConfig() *Config {
 	// Custom usage decription
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] bucket_name[/path][/file] path\n", os.Args[0])
+		fmt.Printf("Usage: %s [OPTIONS] bucket_name[/path][/file] path\n", os.Args[0])
 		fmt.Println("\nArguments 'bucket_name' and 'path' are mandatory.")
 		fmt.Println("Credentials must be provided via environment variable GOOGLE_APPLICATION_CREDENTIALS.")
 		fmt.Println("Example: export GOOGLE_APPLICATION_CREDENTIALS=~/credentials.json")
@@ -43,7 +45,7 @@ func NewConfig() *Config {
 		flag.PrintDefaults()
 	}
 
-	isMultiThread := flag.Bool("m", false, "Run command in multi-thread mode")
+	isMultiThread := flag.Bool("m", false, "Run command in multi-threading mode")
 	flag.Parse()
 
 	argLen := len(flag.Args())
@@ -74,6 +76,7 @@ func NewConfig() *Config {
 	Create new storage object
 */
 func NewStorage() *Storage {
+	cfg := NewConfig()
 
 	ctx := context.Background()
 	client, err := storage.NewClient(ctx)
@@ -84,7 +87,7 @@ func NewStorage() *Storage {
 	return &Storage{
 		Ctx:    ctx,
 		Client: client,
-		Config: NewConfig(),
+		Config: cfg,
 	}
 }
 
@@ -96,6 +99,7 @@ func (s *Storage) ListObjects() ([]string, error) {
 	defer cancel()
 
 	prefix := s.Config.Prefix
+	// It helps to make relevant filtration by prefix
 	if prefix != "" && !strings.HasSuffix(prefix, "/") && filepath.Ext(prefix) == "" {
 		prefix += "/"
 	}
@@ -124,7 +128,7 @@ func (s *Storage) ListObjects() ([]string, error) {
 }
 
 /*
-	Download bucket object
+	Download object from bucket
 */
 func (s *Storage) DownloadObject(object string) error {
 	ctx, cancel := context.WithTimeout(s.Ctx, time.Second*60)
@@ -138,6 +142,7 @@ func (s *Storage) DownloadObject(object string) error {
 
 	fpath := filepath.Join(s.Config.DestinationPath, object)
 
+	// Create directory path if it does not exist (mkdir -p)
 	if os.MkdirAll(filepath.Dir(fpath), os.ModePerm) != nil {
 		return fmt.Errorf("os.MkdirAll: %v", err)
 	}
@@ -159,7 +164,21 @@ func (s *Storage) DownloadObject(object string) error {
 }
 
 /*
-	Validate and parse GCS uri
+	Background worker for multi-threading mode
+*/
+func (s *Storage) DownloadObjectWithWorker(objects <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// Read objects channel and download each object
+	for obj := range objects {
+		if err := s.DownloadObject(obj); err != nil {
+			exception(err)
+		}
+	}
+}
+
+/*
+	Validate and parse GCS uri ("gs://")
 */
 func parseGCSUrl(uri string) (string, string, error) {
 	const scheme = "gs://"
@@ -210,12 +229,36 @@ func main() {
 		exception(err)
 	}
 
-	for _, obj := range objects {
-		err := storage.DownloadObject(obj)
-		if err != nil {
-			exception(err)
+	objectsCount := len(objects)
+
+	// Multi-Threading mode
+	if storage.Config.isMultiThread {
+		var wg sync.WaitGroup
+		workersCount := runtime.NumCPU() // <= workers pool size
+		objectsChan := make(chan string, objectsCount)
+
+		// Create background workers pool
+		for w := 1; w <= workersCount; w++ {
+			wg.Add(1)
+			go storage.DownloadObjectWithWorker(objectsChan, &wg)
+		}
+
+		// Send objects to channel
+		for j := 0; j < objectsCount; j++ {
+			objectsChan <- objects[j]
+		}
+
+		close(objectsChan)
+		wg.Wait()
+
+	} else {
+		// Usual mode
+		for _, obj := range objects {
+			if err := storage.DownloadObject(obj); err != nil {
+				exception(err)
+			}
 		}
 	}
 
-	fmt.Printf("Operation completed over %d objects.\n", len(objects))
+	fmt.Printf("Operation completed over %d objects.\n", objectsCount)
 }
