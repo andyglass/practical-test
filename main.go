@@ -234,8 +234,12 @@ func main() {
 	// Multi-Threading mode
 	if storage.Config.isMultiThread {
 		var wg sync.WaitGroup
-		workersCount := runtime.NumCPU() // <= workers pool size
 		objectsChan := make(chan string, objectsCount)
+
+		workersCount := runtime.NumCPU() // <= workers pool size
+		if objectsCount < workersCount { // <= reduces unnecessary workers
+			workersCount = objectsCount
+		}
 
 		// Create background workers pool
 		for w := 1; w <= workersCount; w++ {
