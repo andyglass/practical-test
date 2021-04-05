@@ -18,7 +18,7 @@ RUN apk update && \
 
 FROM alpine:latest
 
-COPY --from=builder /build/gcs-cp /gcs-cp
+COPY --from=builder /build/gcs-cp /usr/local/bin/
 
-ENTRYPOINT ["/gcs-cp"]
+ENTRYPOINT ["gcs-cp"]
 CMD ["-help"]
