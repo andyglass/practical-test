@@ -213,13 +213,7 @@ func exception(err error) {
 	os.Exit(1)
 }
 
-/*
-	TODO:
-		- Optional: MultiThreading (-m)
-*/
 func main() {
-
-	// url := "gs://online-infra-engineer-test/mydir"
 
 	storage := NewStorage()
 	defer storage.Client.Close()
